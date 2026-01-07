@@ -1,4 +1,12 @@
-# Remove IDE directory
+# Remove IDE directories
 
 .vs
 .vscode
+
+# Remove some dev directories
+
+test
+dirt
+build
+output
+release
