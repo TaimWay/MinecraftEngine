@@ -47,6 +47,7 @@
 #include <unistd.h>
 #include <pwd.h>
 #include <wordexp.h>
+#include <sys/stat.h>
 #endif
 
 namespace cnt {
@@ -56,9 +57,11 @@ namespace cnt {
             String publisher;
             String structure;
             fs::path path;
+            std::string version;
 
             JavaInfo() = default;
             JavaInfo(String _$name, String _$publisher, String _$structure, fs::path _$path);
+            JavaInfo(String _$name, String _$publisher, String _$structure, fs::path _$path, std::string _$version);
             
             // Operator to compare JavaInfo objects
             bool operator==(const JavaInfo& other) const;
@@ -75,8 +78,8 @@ namespace cnt {
             // Helper function to check if a path is a valid Java executable
             bool isValidJavaExecutable(const fs::path& javaPath);
             
-            // Helper function to get Java version info from directory
-            std::string getJavaVersionInfo(const fs::path& javaDir);
+            // Helper function to get Java version info from executable
+            std::string getJavaVersionInfo(const fs::path& javaPath);
             
             // Helper function to get Java publisher/origin from directory
             std::string getJavaPublisher(const fs::path& javaDir);
@@ -121,5 +124,9 @@ namespace cnt {
         JavaList SearchJava$Deep();
     }
 }
+
+#ifdef MINECRAFT_ENGINE_IMPLEMENTATION
+#include <minecraft/source/java.cpp>
+#endif // MINECRAFT_ENGINE_IMPLEMENTATION
 
 #endif // !__MINECRAFT_ENGINE__JAVA_HPP__

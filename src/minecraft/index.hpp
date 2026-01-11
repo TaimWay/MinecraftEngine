@@ -25,6 +25,7 @@
 #define __MINECRAFT_ENGINE__INDEX_HPP__
 
 #include <minecraft/cntconfig.hpp>
+#include <minecraft/lib/config.hpp>
 
 namespace cnt
 {
@@ -35,16 +36,21 @@ namespace cnt
             String name;
             String description;
             fs::path path;
-
+            cnt::Config _meic_config;
         public:
             Index(fs::path _) : path(_) { _init(); }
         
         private:
             void _init();
+            void _create_meic();
         };
     } // namespace minecraft
     
 } // namespace cnt
+
+#ifdef MINECRAFT_ENGINE_IMPLEMENTATION
+#include <minecraft/source/index.cpp>
+#endif // MINECRAFT_ENGINE_IMPLEMENTATION
 
 
 #endif // !__MINECRAFT_ENGINE__INDEX_HPP__
