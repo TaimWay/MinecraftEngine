@@ -2,7 +2,7 @@
  * Minecraft Engine
  * Copyright (C) 2026 TaimWay <taimway@gmail.com>
  * 
- * @File: source/java.cpp
+ * @File: minecraft/source/java.cpp
  * @Description: 
  * @Ownership: TaimWay <taimway@gmail.com> - 01/07/2026
  *
@@ -26,7 +26,11 @@ namespace cnt
 {
     namespace minecraft
     {
-        JavaInfo::JavaInfo(String _$name, String _$publisher, String _$structure, fs::path _$path) : name(_$name), publisher(_$publisher), structure(_$structure), path(_$path) {}
+        JavaInfo::JavaInfo(String _$name, String _$publisher, String _$structure, fs::path _$path) 
+            : name(_$name), publisher(_$publisher), structure(_$structure), path(_$path), version("") {}
+        
+        JavaInfo::JavaInfo(String _$name, String _$publisher, String _$structure, fs::path _$path, std::string _$version)
+            : name(_$name), publisher(_$publisher), structure(_$structure), path(_$path), version(_$version) {}
 
         bool JavaInfo::operator==(const JavaInfo &other) const
         {
@@ -64,11 +68,53 @@ namespace cnt
                 return filename.find("java") != std::string::npos;
             }
 
-            // Helper function to get Java version info from directory
-            std::string getJavaVersionInfo(const fs::path &javaDir)
+            // Helper function to get Java version info from executable
+            std::string getJavaVersionInfo(const fs::path &javaPath)
             {
-                // Use the directory name as version info
-                return javaDir.filename().string();
+                std::string command;
+                
+#ifdef _WIN32
+                command = "\"" + javaPath.string() + "\" -version 2>&1";
+#else
+                command = javaPath.string() + " -version 2>&1";
+#endif
+                
+                FILE* pipe = popen(command.c_str(), "r");
+                if (!pipe)
+                {
+                    // Fallback to directory name if we can't execute java
+                    if (javaPath.has_parent_path() && javaPath.parent_path().has_parent_path())
+                    {
+                        return javaPath.parent_path().parent_path().filename().string();
+                    }
+                    return javaPath.parent_path().filename().string();
+                }
+                
+                char buffer[256];
+                std::string result;
+                while (fgets(buffer, sizeof(buffer), pipe) != nullptr)
+                {
+                    result += buffer;
+                }
+                pclose(pipe);
+                
+                // Parse version from output
+                if (result.find("version \"") != std::string::npos)
+                {
+                    size_t start = result.find("version \"") + 9;
+                    size_t end = result.find("\"", start);
+                    if (end != std::string::npos)
+                    {
+                        return result.substr(start, end - start);
+                    }
+                }
+                
+                // Fallback
+                if (javaPath.has_parent_path() && javaPath.parent_path().has_parent_path())
+                {
+                    return javaPath.parent_path().parent_path().filename().string();
+                }
+                return javaPath.parent_path().filename().string();
             }
 
             // Helper function to get Java publisher/origin from directory
@@ -195,7 +241,6 @@ namespace cnt
             }
 
             // Helper function to scan directory for Java installations
-            // Helper function to scan directory for Java installations
             void scanDirectoryForJava(const fs::path &directory, JavaList &result, bool recursive)
             {
                 if (!fs::exists(directory) || !fs::is_directory(directory))
@@ -228,7 +273,6 @@ namespace cnt
                                         continue;
                                     }
 
-// Check if this is a Java installation directory
 #ifdef _WIN32
                                     fs::path javaExe = entry.path() / "bin" / "java.exe";
 #else
@@ -245,11 +289,11 @@ namespace cnt
                                         // Only add if it's a proper Java installation
                                         if (fs::exists(javaDir / "bin" / javaExe.filename()))
                                         {
-                                            std::string version = getJavaVersionInfo(javaDir);
+                                            std::string version = getJavaVersionInfo(javaExe);
                                             std::string publisher = getJavaPublisher(javaDir);
                                             std::string structure = getJavaStructure(javaDir);
 
-                                            JavaInfo javaInfo(version, publisher, structure, javaDir);
+                                            JavaInfo javaInfo(javaDir.filename().string(), publisher, structure, javaDir, version);
 
                                             // Avoid duplicates
                                             if (std::find(result.begin(), result.end(), javaInfo) == result.end())
@@ -279,7 +323,6 @@ namespace cnt
                             {
                                 if (fs::is_directory(entry.path()))
                                 {
-// Check for bin directory with java executable
 #ifdef _WIN32
                                     fs::path javaExe = entry.path() / "bin" / "java.exe";
 #else
@@ -293,11 +336,11 @@ namespace cnt
                                         // Get Java installation directory
                                         fs::path javaDir = entry.path();
 
-                                        std::string version = getJavaVersionInfo(javaDir);
+                                        std::string version = getJavaVersionInfo(javaExe);
                                         std::string publisher = getJavaPublisher(javaDir);
                                         std::string structure = getJavaStructure(javaDir);
 
-                                        JavaInfo javaInfo(version, publisher, structure, javaDir);
+                                        JavaInfo javaInfo(javaDir.filename().string(), publisher, structure, javaDir, version);
 
                                         // Avoid duplicates
                                         if (std::find(result.begin(), result.end(), javaInfo) == result.end())
@@ -369,6 +412,7 @@ namespace cnt
                 if (SUCCEEDED(SHGetFolderPath(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, localAppDataPath)))
                 {
                     locations.push_back(fs::path(tcharToString(localAppDataPath)) / "Programs" / "Java");
+                    locations.push_back(fs::path(tcharToString(localAppDataPath)) / "Java");
                 }
 
 #else
@@ -393,6 +437,15 @@ namespace cnt
                 {
                     locations.push_back(fs::path(homeDir) / ".jdks");
                     locations.push_back(fs::path(homeDir) / ".local" / "share" / "java");
+                    locations.push_back(fs::path(homeDir) / ".local" / "bin");
+                }
+
+                // Try to get home directory from password database
+                struct passwd *pw = getpwuid(getuid());
+                if (pw != nullptr && pw->pw_dir != nullptr)
+                {
+                    locations.push_back(fs::path(pw->pw_dir) / ".jdks");
+                    locations.push_back(fs::path(pw->pw_dir) / ".local" / "share" / "java");
                 }
 #endif
 
@@ -427,11 +480,20 @@ namespace cnt
                     locations.push_back(userProfile / "Desktop");
                     locations.push_back(userProfile / "Documents");
                     locations.push_back(userProfile / "AppData" / "Local" / "Programs");
+                    
+                    // More thorough AppData scanning
+                    locations.push_back(userProfile / "AppData" / "Local");
+                    locations.push_back(userProfile / "AppData" / "Roaming");
+                    locations.push_back(userProfile / "AppData" / "LocalLow");
                 }
 
                 // Additional common Windows locations
                 locations.push_back("C:\\Program Files");
                 locations.push_back("C:\\Program Files (x86)");
+                
+                // Registry-based Java installations (common locations)
+                locations.push_back("C:\\ProgramData\\Oracle\\Java");
+                locations.push_back("C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Java");
 
 #else
                 // Linux deep search locations
@@ -448,6 +510,13 @@ namespace cnt
                     locations.push_back(fs::path(homeDir) / ".sdkman" / "candidates" / "java");
                 }
 
+                // Try to get home directory from password database
+                struct passwd *pw = getpwuid(getuid());
+                if (pw != nullptr && pw->pw_dir != nullptr)
+                {
+                    locations.push_back(fs::path(pw->pw_dir) / ".sdkman" / "candidates" / "java");
+                }
+
                 // Try to expand SDKMAN path
                 wordexp_t p;
                 if (wordexp("~/.sdkman/candidates/java/*", &p, 0) == 0)
@@ -457,6 +526,23 @@ namespace cnt
                         locations.push_back(fs::path(p.we_wordv[i]));
                     }
                     wordfree(&p);
+                }
+
+                // Common Linux package manager Java installations
+                locations.push_back("/usr/lib/jvm/default-java");
+                locations.push_back("/usr/lib/jvm/default");
+                
+                // Flatpak and Snap installations
+                locations.push_back("/var/lib/flatpak/app/");
+                locations.push_back("/snap/");
+                
+                // NixOS
+                locations.push_back("/nix/store/");
+                
+                // Asdf version manager
+                if (homeDir != nullptr)
+                {
+                    locations.push_back(fs::path(homeDir) / ".asdf" / "installs" / "java");
                 }
 #endif
 
@@ -490,7 +576,6 @@ namespace cnt
                         fs::path dirPath(path);
                         if (fs::exists(dirPath) && fs::is_directory(dirPath))
                         {
-// Look for java executable in this directory
 #ifdef _WIN32
                             fs::path javaExe = dirPath / "java.exe";
 #else
@@ -507,11 +592,11 @@ namespace cnt
                                 // Only add if it's a proper Java installation
                                 if (fs::exists(javaDir / "bin" / javaExe.filename()))
                                 {
-                                    std::string version = getJavaVersionInfo(javaDir);
+                                    std::string version = getJavaVersionInfo(javaExe);
                                     std::string publisher = getJavaPublisher(javaDir);
                                     std::string structure = getJavaStructure(javaDir);
 
-                                    JavaInfo javaInfo(version, publisher, structure, javaDir);
+                                    JavaInfo javaInfo(javaDir.filename().string(), publisher, structure, javaDir, version);
 
                                     // Avoid duplicates
                                     if (std::find(result.begin(), result.end(), javaInfo) == result.end())
@@ -550,11 +635,11 @@ namespace cnt
                                 // Only add if it's a proper Java installation
                                 if (fs::exists(javaDir / "bin" / javaExe.filename()))
                                 {
-                                    std::string version = getJavaVersionInfo(javaDir);
+                                    std::string version = getJavaVersionInfo(javaExe);
                                     std::string publisher = getJavaPublisher(javaDir);
                                     std::string structure = getJavaStructure(javaDir);
 
-                                    JavaInfo javaInfo(version, publisher, structure, javaDir);
+                                    JavaInfo javaInfo(javaDir.filename().string(), publisher, structure, javaDir, version);
 
                                     // Avoid duplicates
                                     if (std::find(result.begin(), result.end(), javaInfo) == result.end())
@@ -647,15 +732,24 @@ namespace cnt
                 if (locationStr.find("download") != std::string::npos ||
                     locationStr.find("desktop") != std::string::npos ||
                     locationStr.find("documents") != std::string::npos ||
-                    locationStr.find("programs") != std::string::npos)
+                    locationStr.find("programs") != std::string::npos ||
+                    locationStr.find("appdata") != std::string::npos)
                 {
                     recursive = true;
                 }
 #else
-                // On Linux, recursive scan for home directories and opt
+                // On Linux, recursive scan for home directories, opt and snap
                 std::string locationStr = location.string();
+                std::transform(locationStr.begin(), locationStr.end(), locationStr.begin(),
+                               [](unsigned char c)
+                               { return std::tolower(c); });
+
                 if (locationStr.find("/home/") == 0 ||
-                    locationStr.find("/.sdkman/") != std::string::npos)
+                    locationStr.find("/.sdkman/") != std::string::npos ||
+                    locationStr.find("/.asdf/") != std::string::npos ||
+                    locationStr.find("/opt/") != std::string::npos ||
+                    locationStr.find("/snap/") != std::string::npos ||
+                    locationStr.find("/nix/store/") != std::string::npos)
                 {
                     recursive = true;
                 }
